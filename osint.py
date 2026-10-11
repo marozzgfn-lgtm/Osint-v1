@@ -10,7 +10,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-TOKEN = "8774132269:AAG-1aHseo4MFZmSjOYiTDm1JwkjxuCKP0c"
+TOKEN = "8638984746:AAEj_qfMxDHKaTXtafJbdFlP8OV8t72MLZA"
 ADMIN_ID = 6894427356
 
 logging.basicConfig(level=logging.INFO)
