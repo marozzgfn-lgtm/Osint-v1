@@ -5,19 +5,18 @@ import aiohttp
 import socket
 import ssl
 from datetime import date
-from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-TOKEN = "8774132269:AAG-1aHseo4MFZmSjOYiTDm1JwkjxuCKP0c"  # Вставьте ваш токен
+TOKEN = "8774132269:AAG-1aHseo4MFZmSjOYiTDm1JwkjxuCKP0c"
+ADMIN_ID = 6894427356
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect("osint_bot.db")
     cursor = conn.cursor()
@@ -68,7 +67,6 @@ def add_bonus(user_id, amount=3):
     conn.commit()
     conn.close()
 
-# FSM Состояния
 class OsintStates(StatesGroup):
     waiting_for_ip = State()
     waiting_for_username = State()
@@ -84,7 +82,6 @@ class OsintStates(StatesGroup):
     waiting_for_wayback = State()
     waiting_for_phone = State()
 
-# --- МЕНЮ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
@@ -118,12 +115,46 @@ async def cmd_start(message: types.Message, command: CommandObject):
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
     
     await message.answer(
-        f"Բարև, {message.from_user.first_name}! Սա հզոր և ընդլայնված OSINT բոտ է։\n"
-        f"Այսօր մնացած հարցումներ: <b>{left}</b>\n\n"
+        f"Բարև, {message.from_user.first_name}! Սա հզոր OSINT բոտ է։\n"
+        f"Այսօր մնացած հարցումներդ: <b>{left}</b>\n\n"
         f"Ընտրիր գործիքը ներքևի ընտրացանկից:",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Դուք չունեք ադմինիստրատորի իրավունքներ։")
+        return
+    
+    await message.answer(
+        "👑 **Ադմինիստրատորի Վահանակ (Admin Panel):**\n\n"
+        "Օգտագործման հրամաններ:\n"
+        "🔹 `/addlimit [user_id] [քանակ]` - Օգտատիրոջը պապիտկա տալու համար\n"
+        "Օրինակ՝ `/addlimit 123456789 10`",
+        parse_mode="Markdown"
+    )
+
+@dp.message(Command("addlimit"))
+async def cmd_addlimit(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    args = command.args
+    if not args:
+        await message.answer("⚠️ Գրեք ճիշտ ֆորմատով՝ `/addlimit [user_id] [քանակ]`", parse_mode="Markdown")
+        return
+    
+    try:
+        parts = args.split()
+        target_user_id = int(parts[0])
+        amount = int(parts[1])
+        
+        add_bonus(target_user_id, amount)
+        await message.answer(f"✅ Հաջողությամբ ավելացվեց **{amount}** հարցում օգտատեր `{target_user_id}`-ին:", parse_mode="Markdown")
+    except Exception as e:
+        await message.answer(f"⚠️ Սխալ հրամանի ձևաչափում: {e}")
 
 @dp.message(F.text == "👥 Моя ссылка (Лимиты)")
 async def referral_link(message: types.Message):
@@ -140,11 +171,10 @@ async def referral_link(message: types.Message):
         parse_mode="Markdown"
     )
 
-# --- 1. IP / DOMAIN GEOLOCATION ---
 @dp.message(F.text == "🌐 IP / Домен")
 async def start_ip(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։ Սպասիր մինչև վաղը կամ խնդրիր ադմինին։")
         return
     await message.answer("Մուտքագրիր IP հասցեն կամ դոմեյնը (օրինակ՝ `8.8.8.8` կամ `google.com`):")
     await state.set_state(OsintStates.waiting_for_ip)
@@ -177,11 +207,10 @@ async def process_ip(message: types.Message, state: FSMContext):
     await message.answer(res, parse_mode="Markdown")
     await state.clear()
 
-# --- 2. USERNAME LOOKUP ---
 @dp.message(F.text == "👤 Username (Соцсети)")
 async def start_username(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր օգտանունը (username) սոցցանցերում փնտրելու համար:")
     await state.set_state(OsintStates.waiting_for_username)
@@ -216,11 +245,10 @@ async def process_username(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown", disable_web_page_preview=True)
     await state.clear()
 
-# --- 3. SSL CERTIFICATE ---
 @dp.message(F.text == "🔒 SSL Сертификат")
 async def start_ssl(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր դոմեյնը SSL ստուգելու համար (օրինակ՝ `google.com`):")
     await state.set_state(OsintStates.waiting_for_ssl)
@@ -251,11 +279,10 @@ async def process_ssl(message: types.Message, state: FSMContext):
     await message.answer(info, parse_mode="Markdown")
     await state.clear()
 
-# --- 4. FUZZING ---
 @dp.message(F.text == "📂 Fuzzing Директорий")
 async def start_fuzz(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր կայքի URL-ը (օրինակ՝ `https://example.com`):")
     await state.set_state(OsintStates.waiting_for_fuzz)
@@ -284,11 +311,10 @@ async def process_fuzz(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 5. PORT SCANNER ---
 @dp.message(F.text == "⚡ Сканер портов")
 async def start_ports(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր դոմեյնը կամ IP-ն պորտերը ստուգելու համար:")
     await state.set_state(OsintStates.waiting_for_ports)
@@ -322,11 +348,10 @@ async def process_ports(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 6. MAC VENDOR ---
 @dp.message(F.text == "🔍 MAC Vendor Lookup")
 async def start_mac(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր MAC հասցեն (օրինակ՝ `00:1A:2B:3C:4D:5E`):")
     await state.set_state(OsintStates.waiting_for_mac)
@@ -350,11 +375,10 @@ async def process_mac(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 7. PDF METADATA ---
 @dp.message(F.text == "📄 Анализ PDF")
 async def start_doc(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Ուղարկիր PDF ֆայլը (document ֆորմատով) մետատվյալները կարդալու համար:")
     await state.set_state(OsintStates.waiting_for_doc)
@@ -391,11 +415,10 @@ async def process_doc(message: types.Message, state: FSMContext):
         await message.answer(f"⚠️ Սխալ: {e}")
     await state.clear()
 
-# --- 8. EXIF PHOTO ---
 @dp.message(F.text == "🖼️ EXIF Фото")
 async def start_photo(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Ուղարկիր նկարը (photo ֆորմատով), որպեսզի ստուգեմ նրա EXIF մետատվյալները:")
     await state.set_state(OsintStates.waiting_for_photo)
@@ -425,7 +448,7 @@ async def process_photo(message: types.Message, state: FSMContext):
                     result += f"🔹 {tag}: `{value}`\n"
                     found = True
             if not found:
-                result += "❌ Հիմնական EXIF տվյալներ չեն հայտնաբերվել (հնարավոր է սոցցանցերն են հեռացրել):"
+                result += "❌ Հիմնական EXIF տվյալներ չեն հայտնաբերվել:"
         else:
             result += "❌ EXIF տվյալներ բացակայում են:"
             
@@ -434,11 +457,10 @@ async def process_photo(message: types.Message, state: FSMContext):
         await message.answer(f"⚠️ Սխալ: {e}")
     await state.clear()
 
-# --- 9. HTTP HEADERS ---
 @dp.message(F.text == "🛡️ HTTP Headers")
 async def start_headers(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր կայքի URL-ը HTTP գլխագրերը (Headers) ստուգելու համար:")
     await state.set_state(OsintStates.waiting_for_headers)
@@ -459,18 +481,16 @@ async def process_headers(message: types.Message, state: FSMContext):
                 result += f"🔹 **Content-Type:** `{headers.get('Content-Type', 'Անհայտ')}`\n"
                 result += f"🔹 **Strict-Transport-Security:** `{headers.get('Strict-Transport-Security', 'Չկա')}`\n"
                 result += f"🔹 **X-Frame-Options:** `{headers.get('X-Frame-Options', 'Չկա')}`\n"
-                result += f"🔹 **X-XSS-Protection:** `{headers.get('X-XSS-Protection', 'Չկա')}`\n"
         except Exception as e:
             result = f"⚠️ Սխալ: {e}"
 
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 10. EMAIL LEAK CHECK (Public API simulation / HIBP style) ---
 @dp.message(F.text == "⚠️ Проверка утечек (Email)")
 async def start_leak(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր էլ․ հասցեն (Email) արտահոսքերի բազաներում ստուգելու համար:")
     await state.set_state(OsintStates.waiting_for_leak)
@@ -480,7 +500,6 @@ async def process_leak(message: types.Message, state: FSMContext):
     email = message.text.strip()
     decrease_limit(message.from_user.id)
     
-    # Օգտագործում ենք ազատ հանրային API (leaks lookup) կամ պարզ ստուգում
     url = f"https://api.xposedornot.com/v1/check-email/{email}"
     async with aiohttp.ClientSession() as session:
         try:
@@ -489,8 +508,7 @@ async def process_leak(message: types.Message, state: FSMContext):
                     data = await resp.json()
                     breaches = data.get("Breaches", [])
                     if breaches:
-                        result = f"⚠️ **Զգուշացում! Email `{email}` գտնվել է արտահոսքերում:**\n\n"
-                        result += f"🔹 Հայտնաբերված բազաներ: {', '.join(breaches[:5])}"
+                        result = f"⚠️ **Զգուշացում! Email `{email}` գտնվել է արտահոսքերում:**\n\n🔹 Հայտնաբերված բազաներ: {', '.join(breaches[:5])}"
                     else:
                         result = f"✅ **Email `{email}` տվյալների արտահոսքերում չի հայտնաբերվել:**"
                 else:
@@ -501,11 +519,10 @@ async def process_leak(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 11. DNS LOOKUP ---
 @dp.message(F.text == "🔤 DNS Записи")
 async def start_dns(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր դոմեյնը DNS գրառումները ստուգելու համար (օրինակ՝ `google.com`):")
     await state.set_state(OsintStates.waiting_for_dns)
@@ -517,31 +534,18 @@ async def process_dns(message: types.Message, state: FSMContext):
     
     result = f"🔤 **DNS Գրառումներ `{domain}`:**\n\n"
     try:
-        # A record (IP)
         ip = socket.gethostbyname(domain)
         result += f"🔹 **A Record (IP):** `{ip}`\n"
-        
-        # Օգտագործում ենք Cloudflare DNS over HTTPS API-ն լրիվ DNS-ների համար
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://cloudflare-dns.com/dns-query?name={domain}&type=TXT", headers={"accept": "application/dns-json"}) as resp:
-                data = await resp.json()
-                answer = data.get("Answer", [])
-                txt_records = [ans.get("data") for ans in answer if ans.get("type") == 16]
-                if txt_records:
-                    result += f"🔹 **TXT Records:**\n"
-                    for txt in txt_records[:3]:
-                        result += f"  `{txt}`\n"
     except Exception as e:
         result += f"⚠️ Սխալ: {e}"
 
     await message.answer(result, parse_mode="Markdown")
     await state.clear()
 
-# --- 12. WAYBACK MACHINE ARCHIVE CHECK ---
 @dp.message(F.text == "🏛️ Wayback Archive")
 async def start_wayback(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր դոմեյնը արխիվային պատմությունը ստուգելու համար:")
     await state.set_state(OsintStates.waiting_for_wayback)
@@ -574,11 +578,10 @@ async def process_wayback(message: types.Message, state: FSMContext):
     await message.answer(result, parse_mode="Markdown", disable_web_page_preview=True)
     await state.clear()
 
-# --- 13. PHONE CARRIER LOOKUP ---
 @dp.message(F.text == "📱 Проверка телефона")
 async def start_phone(message: types.Message, state: FSMContext):
     if get_user(message.from_user.id) <= 0:
-        await message.answer("❌ Լիմիտն սպառվել է։")
+        await message.answer("❌ Այսօրվա լիմիտն սպառվել է։")
         return
     await message.answer("Մուտքագրիր հեռախոսահամարը միջազգային ձևաչափով (օրինակ՝ `+37491XXXXXX`):")
     await state.set_state(OsintStates.waiting_for_phone)
@@ -588,7 +591,6 @@ async def process_phone(message: types.Message, state: FSMContext):
     phone = message.text.strip().replace("+", "")
     decrease_limit(message.from_user.id)
     
-    # Օգտագործում ենք բաց հանրային համարների ստուգման ապի
     url = f"https://htmlweb.ru/json/geo/phone?json&tel={phone}"
     async with aiohttp.ClientSession() as session:
         try:
